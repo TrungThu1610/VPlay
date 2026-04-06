@@ -1,0 +1,5 @@
+{
+  "name": "TVGo Streaming App",
+  "description": "A live TV streaming application with channel switching, program guides, and responsive design.",
+  "requestFramePermissions": []
+}
