@@ -8,7 +8,7 @@ import { Search, User, Tv, Calendar, Home, Play, Pause, Radio, Info, Sun, Moon, 
 import Hls from "hls.js";
 import { motion, AnimatePresence } from "motion/react";
 import { auth, db } from "./firebase";
-import { signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged, updateProfile, User as FirebaseUser } from "firebase/auth";
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, updateProfile, User as FirebaseUser } from "firebase/auth";
 import { doc, getDoc, setDoc, collection, getDocs, serverTimestamp } from "firebase/firestore";
 
 import { channels } from "./channels";
@@ -539,6 +539,72 @@ function InfoContent({ isDark }: { isDark: boolean }) {
   );
 }
 
+function AuthModal({ isOpen, onClose, isDark }: { isOpen: boolean, onClose: () => void, isDark: boolean }) {
+  const [isLogin, setIsLogin] = useState(true);
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  if (!isOpen) return null;
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+    try {
+      const email = username.includes('@') ? username : `${username}@vplay.local`;
+      if (isLogin) {
+        await signInWithEmailAndPassword(auth, email, password);
+      } else {
+        const userCred = await createUserWithEmailAndPassword(auth, email, password);
+        await updateProfile(userCred.user, { displayName: username.split('@')[0] });
+      }
+      onClose();
+    } catch (err: any) {
+      if (err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password' || err.code === 'auth/user-not-found') {
+        setError("Tên đăng nhập hoặc mật khẩu không chính xác.");
+      } else if (err.code === 'auth/email-already-in-use') {
+        setError("Tên đăng nhập này đã được sử dụng.");
+      } else if (err.code === 'auth/weak-password') {
+        setError("Mật khẩu quá yếu (ít nhất 6 ký tự).");
+      } else {
+        setError(err.message);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4">
+      <div className={`w-full max-w-md p-6 rounded-2xl shadow-xl ${isDark ? "bg-slate-900 text-white" : "bg-white text-slate-900"}`}>
+        <h2 className="text-2xl font-bold mb-6 text-center">{isLogin ? "Đăng nhập" : "Đăng ký"}</h2>
+        {error && <div className="mb-4 p-3 bg-red-500/10 border border-red-500/50 text-red-500 rounded-lg text-sm">{error}</div>}
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium mb-1">Tên đăng nhập</label>
+            <input required value={username} onChange={e => setUsername(e.target.value)} className={`w-full px-4 py-2 rounded-lg border focus:outline-none focus:ring-2 focus:ring-blue-500 ${isDark ? "bg-slate-800 border-slate-700" : "bg-slate-50 border-slate-300"}`} placeholder="Nhập tên đăng nhập..." />
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">Mật khẩu</label>
+            <input required type="password" value={password} onChange={e => setPassword(e.target.value)} className={`w-full px-4 py-2 rounded-lg border focus:outline-none focus:ring-2 focus:ring-blue-500 ${isDark ? "bg-slate-800 border-slate-700" : "bg-slate-50 border-slate-300"}`} placeholder="Nhập mật khẩu..." />
+          </div>
+          <button type="submit" disabled={loading} className="w-full py-3 bg-blue-500 text-white rounded-lg font-medium hover:bg-blue-600 disabled:opacity-50 transition-colors">
+            {loading ? "Đang xử lý..." : (isLogin ? "Đăng nhập" : "Đăng ký")}
+          </button>
+        </form>
+        <div className="mt-4 text-center text-sm">
+          <button type="button" onClick={() => setIsLogin(!isLogin)} className="text-blue-500 hover:underline">
+            {isLogin ? "Chưa có tài khoản? Đăng ký ngay" : "Đã có tài khoản? Đăng nhập"}
+          </button>
+        </div>
+        <button onClick={onClose} className="mt-6 w-full py-2 border rounded-lg hover:bg-slate-100 transition-colors text-slate-500 hover:text-slate-700 dark:border-slate-700 dark:hover:bg-slate-800 dark:text-slate-400 dark:hover:text-slate-200">Đóng</button>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [activeTab, setActiveTab] = useState("Trang chủ");
   const [activeChannel, setActiveChannel] = useState(channels[0]);
@@ -547,6 +613,7 @@ export default function App() {
   const [user, setUser] = useState<FirebaseUser | null>(null);
   const [userData, setUserData] = useState<any>(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [showAuthModal, setShowAuthModal] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
@@ -561,7 +628,7 @@ export default function App() {
           setUserData(userSnap.data());
         } else {
           // Check if it's the default admin
-          if (currentUser.email === "nguyentrungthu1610@gmail.com" && currentUser.emailVerified) {
+          if (currentUser.email === "nguyentrungthu1610@gmail.com") {
             role = "admin";
           }
           const newUserData: any = {
@@ -585,13 +652,8 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  const handleLogin = async () => {
-    const provider = new GoogleAuthProvider();
-    try {
-      await signInWithPopup(auth, provider);
-    } catch (error) {
-      console.error("Login failed", error);
-    }
+  const handleLogin = () => {
+    setShowAuthModal(true);
   };
 
   const handleLogout = async () => {
@@ -621,7 +683,7 @@ export default function App() {
 
   return (
     <div className={`${isDark ? "bg-slate-950 text-white" : "bg-white text-slate-950"} min-h-screen flex flex-col transition-colors duration-300`}>
-      
+      <AuthModal isOpen={showAuthModal} onClose={() => setShowAuthModal(false)} isDark={isDark} />
       {/* HEADER */}
       <header className={`flex items-center justify-between p-4 backdrop-blur-md sticky top-0 z-50 border-b ${isDark ? "bg-slate-900/80 border-slate-800" : "bg-slate-100/80 border-slate-300"}`}>
         <img src="https://plain-apac-prod-public.komododecks.com/202604/07/UVfrgsfRDLt4CYroyI1q/image.png" alt="VPlay Logo" className={`h-10 w-auto transition-all duration-300 ${!isDark ? "drop-shadow-md" : ""}`} referrerPolicy="no-referrer" />
